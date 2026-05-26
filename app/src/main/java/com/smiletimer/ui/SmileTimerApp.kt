@@ -207,7 +207,7 @@ fun SmileTimerScreen(
                 verticalArrangement = Arrangement.Center
             ) {
                 SmileFace(
-                    expressionValue = visualProgress,
+                    expressionValue = 1f,   // always happy 😊
                     modifier        = Modifier
                         .fillMaxWidth()
                         .weight(1f)
