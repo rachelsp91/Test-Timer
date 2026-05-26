@@ -22,9 +22,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -37,6 +39,22 @@ import com.smiletimer.ui.theme.BackgroundDark
 import com.smiletimer.ui.theme.SmileTimerTheme
 import com.smiletimer.ui.theme.TextPrimary
 import com.smiletimer.ui.theme.TextSecondary
+
+// ── Screen-wake helper ────────────────────────────────────────────────────────
+
+/**
+ * Keeps the screen awake while [enabled] is true.
+ * Uses View.keepScreenOn — no extra permissions required.
+ * Automatically releases when the composable leaves the composition.
+ */
+@Composable
+fun KeepScreenOn(enabled: Boolean) {
+    val view = LocalView.current
+    DisposableEffect(enabled) {
+        view.keepScreenOn = enabled
+        onDispose { view.keepScreenOn = false }
+    }
+}
 
 // ── App entry point ───────────────────────────────────────────────────────────
 
@@ -74,6 +92,9 @@ fun SmileTimerScreen(
     onModeChange: (com.smiletimer.TimerMode) -> Unit,
     onVolumeChange: (com.smiletimer.VolumeLevel) -> Unit
 ) {
+    // Keep screen on while the timer is actively running
+    KeepScreenOn(enabled = uiState.timerState == TimerState.RUNNING)
+
     Column(
         modifier = Modifier
             .fillMaxSize()
