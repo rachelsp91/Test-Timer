@@ -5,7 +5,7 @@
         Compose handles all UI; this only sets the splash-window background.
         enableEdgeToEdge() in MainActivity handles status/nav bar transparency.
     -->
-    <style name="Theme.SmileTimer" parent="android:Theme.Material.NoTitleBar">
+    <style name="Theme.SmileTimer" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:windowBackground">@color/ic_launcher_background</item>
     </style>
 </resources>
