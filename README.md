@@ -10,8 +10,11 @@ A visual countdown/count-up timer for children — including kids with ADHD and 
 |---|---|
 | **Timer modes** | Countdown or Count-Up, 1–99 minutes |
 | **Visual progress** | 36 LED-style segments arranged in a clock circle |
-| **Colour stages** | Green → Yellow → Orange → Red as time runs out (smooth transitions) |
-| **Smiley face** | Animated ⭐ star eyes + expression that shifts happy → sad |
+| **Countdown colours** | Green → Yellow → Orange → Red as time runs out |
+| **Count-up colours** | Red → Orange → Yellow → Green as goal approaches |
+| **Smiley face (countdown)** | Starts happy 😄, gets sad 😟 as time runs out |
+| **Smiley face (count-up)** | Starts sad 😟, gets happy 😄 as goal is reached |
+| **Arc direction** | Countdown depletes clockwise; Count-up fills in reverse |
 | **Controls** | Large +/− buttons to set minutes; Start / Pause / Resume / Reset |
 | **Alarm** | Rings continuously when timer ends — stops when you tap Reset |
 | **Alarm tone** | 🎵 Choose any system ringtone, alarm, or notification sound — saved between sessions |
@@ -28,6 +31,17 @@ A visual countdown/count-up timer for children — including kids with ADHD and 
 3. Tap **▶ START**
 4. When the timer finishes the alarm rings — tap **↺ RESET** to stop it
 5. Tap **🎵 Alarm Tone** at any time to choose a different alarm sound
+
+---
+
+## Mode behaviour at a glance
+
+| | **⏬ Countdown** | **⏫ Count-up** |
+|---|---|---|
+| Arc | Starts full, depletes toward 12 o'clock | Starts empty, fills away from 12 o'clock |
+| Colour | Green → Red | Red → Green |
+| Face | 😄 → 😟 | 😟 → 😄 |
+| Good for | Time limits ("5 more minutes") | Reward goals ("work for 10 minutes") |
 
 ---
 
@@ -54,34 +68,6 @@ A visual countdown/count-up timer for children — including kids with ADHD and 
 
 ---
 
-## Building
-
-### Requirements
-
-- Android Studio Hedgehog (2023.1) or newer
-- Android SDK 26+
-- Kotlin 2.0+
-
-### Run in Android Studio
-
-1. **File → New → Project from Version Control**
-2. Paste `https://github.com/rachelsp91/test-timer.git`
-3. Switch to branch `claude/smile-timer-android-app-FdOi8`
-4. Let Gradle sync, then press **▶ Run**
-
-### Build a debug APK
-
-**Build → Build Bundle(s) / APK(s) → Build APK(s)**
-
-The APK is saved to:
-```
-app/build/outputs/apk/debug/app-debug.apk
-```
-
-Install on any Android phone by enabling **Settings → Apps → Install unknown apps**, then tapping the APK file.
-
----
-
 ## Architecture
 
 ```
@@ -90,7 +76,7 @@ app/src/main/java/com/smiletimer/
 ├── SmileTimerViewModel.kt        # Timer state, alarm sound, tone persistence
 └── ui/
     ├── SmileTimerApp.kt          # Root composable, ringtone picker launcher,
-    │                             #   screen-wake (keepScreenOn)
+    │                             #   screen-wake (keepScreenOn), visualProgress
     ├── SmileFace.kt              # Canvas-drawn animated smiley face
     │                             #   (star eyes, bezier mouth, brows, blush)
     ├── SegmentedTimerArc.kt      # 36-segment LED-style progress arc
@@ -104,7 +90,9 @@ app/src/main/java/com/smiletimer/
 ### Key implementation notes
 
 - **Timer loop** — coroutine-based (`viewModelScope.launch` + `delay(1000)`), supports pause/resume cleanly
-- **Alarm** — `MediaPlayer` with user-chosen URI; loops until `resetTimer()` calls `stopAlarm()`; falls back to `ToneGenerator` if the URI fails
+- **visualProgress** — computed in the UI layer: `fractionRemaining` for countdown, `1 − fractionRemaining` for count-up; always 0→1 as timer advances; drives both the face expression and arc colour/fill
+- **Arc direction** — countdown lights segments `i < litCount` (clockwise from 12); count-up lights `i >= TOTAL − litCount` (reverse fill from 12 outward), creating a true mirror animation
+- **Alarm** — `MediaPlayer` with user-chosen URI; loops (`isLooping = true`) until `resetTimer()` calls `stopAlarm()`; falls back to `ToneGenerator` if URI fails
 - **Tone persistence** — chosen URI stored in `SharedPreferences`, restored in `ViewModel.init`
 - **Screen wake** — `View.keepScreenOn` toggled via `DisposableEffect`; no `WAKE_LOCK` permission needed
 - **Ringtone picker** — Android's built-in `RingtoneManager.ACTION_RINGTONE_PICKER`; result handled via `rememberLauncherForActivityResult`
