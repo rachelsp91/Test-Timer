@@ -180,6 +180,14 @@ fun SmileTimerScreen(
         )
 
         // ── Circular timer display ────────────────────────────────────────────
+        // ── Visual progress: always 0.0 (start) → 1.0 (goal reached) ────────────
+        // Countdown: fractionRemaining goes 1→0, so use it directly.
+        // Count-up:  fractionRemaining also goes 1→0 internally, so invert it
+        //            so that the arc fills and the face brightens as time elapses.
+        val isCountUp      = uiState.timerMode == TimerMode.COUNTUP
+        val visualProgress = if (isCountUp) 1f - uiState.fractionRemaining
+                             else           uiState.fractionRemaining
+
         Box(
             modifier         = Modifier
                 .fillMaxWidth()
@@ -187,9 +195,10 @@ fun SmileTimerScreen(
             contentAlignment = Alignment.Center
         ) {
             SegmentedTimerArc(
-                fractionRemaining = uiState.fractionRemaining,
-                isFlashing        = uiState.isFlashing,
-                modifier          = Modifier.fillMaxSize()
+                visualProgress = visualProgress,
+                isFlashing     = uiState.isFlashing,
+                isCountUp      = isCountUp,
+                modifier       = Modifier.fillMaxSize()
             )
 
             Column(
@@ -198,7 +207,7 @@ fun SmileTimerScreen(
                 verticalArrangement = Arrangement.Center
             ) {
                 SmileFace(
-                    expressionValue = uiState.fractionRemaining,
+                    expressionValue = visualProgress,
                     modifier        = Modifier
                         .fillMaxWidth()
                         .weight(1f)
