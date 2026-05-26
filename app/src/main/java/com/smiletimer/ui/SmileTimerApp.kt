@@ -1,14 +1,23 @@
 package com.smiletimer.ui
 
+import android.app.Activity
+import android.content.Intent
+import android.media.RingtoneManager
+import android.net.Uri
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -17,15 +26,20 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -35,8 +49,12 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.smiletimer.SmileTimerViewModel
 import com.smiletimer.TimerState
+import com.smiletimer.TimerUiState
+import com.smiletimer.TimerMode
+import com.smiletimer.VolumeLevel
 import com.smiletimer.ui.theme.BackgroundDark
 import com.smiletimer.ui.theme.SmileTimerTheme
+import com.smiletimer.ui.theme.SurfaceVariant
 import com.smiletimer.ui.theme.TextPrimary
 import com.smiletimer.ui.theme.TextSecondary
 
@@ -45,7 +63,6 @@ import com.smiletimer.ui.theme.TextSecondary
 /**
  * Keeps the screen awake while [enabled] is true.
  * Uses View.keepScreenOn — no extra permissions required.
- * Automatically releases when the composable leaves the composition.
  */
 @Composable
 fun KeepScreenOn(enabled: Boolean) {
@@ -63,17 +80,54 @@ fun SmileTimerApp() {
     val viewModel: SmileTimerViewModel = viewModel()
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
+    // Ringtone picker — launched when the user taps the Alarm Tone row
+    val ringtoneLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val uri: Uri? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                result.data?.getParcelableExtra(
+                    RingtoneManager.EXTRA_RINGTONE_PICKED_URI, Uri::class.java
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                result.data?.getParcelableExtra(RingtoneManager.EXTRA_RINGTONE_PICKED_URI)
+            }
+            viewModel.setAlarmToneUri(uri)
+        }
+    }
+
     SmileTimerTheme {
         SmileTimerScreen(
-            uiState       = uiState,
-            onStart       = viewModel::startTimer,
-            onPause       = viewModel::pauseTimer,
-            onResume      = viewModel::resumeTimer,
-            onReset       = viewModel::resetTimer,
-            onIncrement   = viewModel::incrementMinutes,
-            onDecrement   = viewModel::decrementMinutes,
-            onModeChange  = viewModel::setTimerMode,
-            onVolumeChange = viewModel::setVolumeLevel
+            uiState        = uiState,
+            onStart        = viewModel::startTimer,
+            onPause        = viewModel::pauseTimer,
+            onResume       = viewModel::resumeTimer,
+            onReset        = viewModel::resetTimer,
+            onIncrement    = viewModel::incrementMinutes,
+            onDecrement    = viewModel::decrementMinutes,
+            onModeChange   = viewModel::setTimerMode,
+            onVolumeChange = viewModel::setVolumeLevel,
+            onPickTone     = {
+                val intent = Intent(RingtoneManager.ACTION_RINGTONE_PICKER).apply {
+                    putExtra(RingtoneManager.EXTRA_RINGTONE_TITLE, "Choose Alarm Tone")
+                    putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_SILENT, false)
+                    putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_DEFAULT, true)
+                    putExtra(
+                        RingtoneManager.EXTRA_RINGTONE_TYPE,
+                        RingtoneManager.TYPE_ALL        // shows alarms, ringtones & notifications
+                    )
+                    putExtra(
+                        RingtoneManager.EXTRA_RINGTONE_DEFAULT_URI,
+                        RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+                    )
+                    // Pre-select the currently active tone in the list
+                    uiState.alarmToneUri?.let {
+                        putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, it)
+                    }
+                }
+                ringtoneLauncher.launch(intent)
+            }
         )
     }
 }
@@ -82,15 +136,16 @@ fun SmileTimerApp() {
 
 @Composable
 fun SmileTimerScreen(
-    uiState: com.smiletimer.TimerUiState,
+    uiState: TimerUiState,
     onStart: () -> Unit,
     onPause: () -> Unit,
     onResume: () -> Unit,
     onReset: () -> Unit,
     onIncrement: () -> Unit,
     onDecrement: () -> Unit,
-    onModeChange: (com.smiletimer.TimerMode) -> Unit,
-    onVolumeChange: (com.smiletimer.VolumeLevel) -> Unit
+    onModeChange: (TimerMode) -> Unit,
+    onVolumeChange: (VolumeLevel) -> Unit,
+    onPickTone: () -> Unit
 ) {
     // Keep screen on while the timer is actively running
     KeepScreenOn(enabled = uiState.timerState == TimerState.RUNNING)
@@ -126,43 +181,31 @@ fun SmileTimerScreen(
 
         // ── Circular timer display ────────────────────────────────────────────
         Box(
-            modifier        = Modifier
+            modifier         = Modifier
                 .fillMaxWidth()
                 .aspectRatio(1f),
             contentAlignment = Alignment.Center
         ) {
-            // Segmented arc
             SegmentedTimerArc(
                 fractionRemaining = uiState.fractionRemaining,
                 isFlashing        = uiState.isFlashing,
                 modifier          = Modifier.fillMaxSize()
             )
 
-            // Smiley face + time overlay (60 % of the circle diameter)
             Column(
-                modifier              = Modifier.fillMaxSize(0.58f),
-                horizontalAlignment   = Alignment.CenterHorizontally,
-                verticalArrangement   = Arrangement.Center
+                modifier            = Modifier.fillMaxSize(0.58f),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
             ) {
-                // Smiley face (top 60% of inner area)
                 SmileFace(
                     expressionValue = uiState.fractionRemaining,
                     modifier        = Modifier
                         .fillMaxWidth()
                         .weight(1f)
                 )
-
                 Spacer(Modifier.height(4.dp))
-
-                // Digital time display
-                TimeDisplay(
-                    minutes   = uiState.displayMinutes,
-                    seconds   = uiState.displaySeconds
-                )
-
-                // Status hint below time
+                TimeDisplay(minutes = uiState.displayMinutes, seconds = uiState.displaySeconds)
                 StatusHint(uiState.timerState)
-
                 Spacer(Modifier.height(8.dp))
             }
         }
@@ -195,6 +238,12 @@ fun SmileTimerScreen(
             onVolumeChange = onVolumeChange
         )
 
+        // ── Alarm tone picker ────────────────────────────────────────────────
+        AlarmToneRow(
+            currentUri = uiState.alarmToneUri,
+            onClick    = onPickTone
+        )
+
         Spacer(Modifier.height(8.dp))
     }
 }
@@ -209,11 +258,11 @@ fun TimeDisplay(
     modifier: Modifier = Modifier
 ) {
     Text(
-        text       = "%02d:%02d".format(minutes, seconds),
-        color      = TextPrimary,
-        style      = MaterialTheme.typography.displayLarge,
-        textAlign  = TextAlign.Center,
-        modifier   = modifier
+        text      = "%02d:%02d".format(minutes, seconds),
+        color     = TextPrimary,
+        style     = MaterialTheme.typography.displayLarge,
+        textAlign = TextAlign.Center,
+        modifier  = modifier
     )
 }
 
@@ -227,11 +276,69 @@ private fun StatusHint(timerState: TimerState) {
     }
     if (label.isNotEmpty()) {
         Text(
-            text      = label,
-            color     = TextSecondary,
-            fontSize  = 14.sp,
+            text       = label,
+            color      = TextSecondary,
+            fontSize   = 14.sp,
             fontWeight = FontWeight.SemiBold,
-            textAlign = TextAlign.Center
+            textAlign  = TextAlign.Center
+        )
+    }
+}
+
+/**
+ * Tappable row that opens the system ringtone picker.
+ * Displays the name of the currently selected tone.
+ */
+@Composable
+private fun AlarmToneRow(
+    currentUri: Uri?,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+
+    // Resolve the human-readable name of the current tone
+    val toneName = remember(currentUri) {
+        when {
+            currentUri == null ->
+                RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+                    ?.let { RingtoneManager.getRingtone(context, it)?.getTitle(context) }
+                    ?: "Default Alarm"
+            else ->
+                try { RingtoneManager.getRingtone(context, currentUri)?.getTitle(context) ?: "Custom Tone" }
+                catch (_: Exception) { "Custom Tone" }
+        }
+    }
+
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(SurfaceVariant)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 20.dp, vertical = 16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text("🎵", fontSize = 22.sp)
+        Spacer(Modifier.width(14.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text       = "Alarm Tone",
+                color      = TextSecondary,
+                fontSize   = 12.sp,
+                fontWeight = FontWeight.Medium
+            )
+            Text(
+                text       = toneName,
+                color      = TextPrimary,
+                fontSize   = 15.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+        Text(
+            text     = "›",
+            color    = TextSecondary,
+            fontSize = 22.sp
         )
     }
 }

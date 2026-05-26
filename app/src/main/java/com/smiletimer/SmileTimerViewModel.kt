@@ -1,11 +1,14 @@
 package com.smiletimer
 
 import android.app.Application
+import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.MediaPlayer
 import android.media.RingtoneManager
 import android.media.ToneGenerator
+import android.net.Uri
+import android.os.Build
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Job
@@ -28,7 +31,9 @@ data class TimerUiState(
     val timerState: TimerState = TimerState.IDLE,
     val timerMode: TimerMode = TimerMode.COUNTDOWN,
     val volumeLevel: VolumeLevel = VolumeLevel.HIGH,
-    val isFlashing: Boolean = false
+    val isFlashing: Boolean = false,
+    /** null = use system default alarm tone */
+    val alarmToneUri: Uri? = null
 )
 
 class SmileTimerViewModel(application: Application) : AndroidViewModel(application) {
@@ -50,6 +55,21 @@ class SmileTimerViewModel(application: Application) : AndroidViewModel(applicati
      * - COUNTUP:   starts at 0, increments to totalSeconds
      */
     private var progressSeconds: Int = 5 * 60
+
+    companion object {
+        private const val PREFS_NAME  = "smile_timer_prefs"
+        private const val KEY_TONE_URI = "alarm_tone_uri"
+    }
+
+    init {
+        // Restore the previously chosen alarm tone
+        val saved = getApplication<Application>()
+            .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getString(KEY_TONE_URI, null)
+        if (saved != null) {
+            _uiState.update { it.copy(alarmToneUri = Uri.parse(saved)) }
+        }
+    }
 
     // ──────────────────────────────────────────────────────────────────────────
     // Public control methods
@@ -84,12 +104,25 @@ class SmileTimerViewModel(application: Application) : AndroidViewModel(applicati
         _uiState.update { it.copy(volumeLevel = level) }
     }
 
+    /** Called with the URI returned by the system ringtone picker (null = revert to default). */
+    fun setAlarmToneUri(uri: Uri?) {
+        _uiState.update { it.copy(alarmToneUri = uri) }
+        // Persist so the choice survives app restarts
+        getApplication<Application>()
+            .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .apply {
+                if (uri != null) putString(KEY_TONE_URI, uri.toString())
+                else remove(KEY_TONE_URI)
+            }
+            .apply()
+    }
+
     fun startTimer() {
         val state = _uiState.value
         if (state.timerState == TimerState.RUNNING) return
 
         if (state.timerState == TimerState.IDLE) {
-            // Fresh start – initialise progressSeconds for the selected mode
             progressSeconds = if (state.timerMode == TimerMode.COUNTDOWN) totalSeconds else 0
         }
 
@@ -211,39 +244,42 @@ class SmileTimerViewModel(application: Application) : AndroidViewModel(applicati
 
         val volumePct = if (level == VolumeLevel.HIGH) 100 else 30
 
-        // Try system alarm ringtone first
-        try {
-            val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-                ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
-            if (uri != null) {
-                mediaPlayer?.release()
-                mediaPlayer = MediaPlayer().apply {
-                    setAudioAttributes(
-                        AudioAttributes.Builder()
-                            .setUsage(AudioAttributes.USAGE_ALARM)
-                            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                            .build()
-                    )
-                    setDataSource(getApplication(), uri)
-                    prepare()
-                    setVolume(volumePct / 100f, volumePct / 100f)
-                    start()
-                }
-                viewModelScope.launch {
-                    delay(3_000)
-                    mediaPlayer?.stop()
-                    mediaPlayer?.release()
-                    mediaPlayer = null
-                }
+        // Priority: user-chosen URI → system alarm default → system notification default
+        val uri: Uri = _uiState.value.alarmToneUri
+            ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+            ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+            ?: run {
+                // Last resort: ToneGenerator beep
+                playFallbackTone(volumePct)
                 return
             }
-        } catch (_: Exception) { /* fall through */ }
 
-        // Fallback: ToneGenerator
+        try {
+            mediaPlayer?.release()
+            mediaPlayer = MediaPlayer().apply {
+                setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_ALARM)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build()
+                )
+                setDataSource(getApplication(), uri)
+                isLooping = true    // keep ringing until user taps Reset
+                prepare()
+                setVolume(volumePct / 100f, volumePct / 100f)
+                start()
+            }
+        } catch (_: Exception) {
+            playFallbackTone(volumePct)
+        }
+    }
+
+    private fun playFallbackTone(volumePct: Int) {
         try {
             toneGenerator?.release()
+            // -1 = play indefinitely until stopTone() is called
             toneGenerator = ToneGenerator(AudioManager.STREAM_ALARM, volumePct)
-            toneGenerator?.startTone(ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, 3_000)
+            toneGenerator?.startTone(ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, -1)
         } catch (_: Exception) { /* ignore */ }
     }
 
